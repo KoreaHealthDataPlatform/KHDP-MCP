@@ -43,8 +43,14 @@ class Session:
 
     # ------------------------------------------------------------------
 
-    def login(self, *, email: str, password: str) -> TokenSet:
-        tokens = self.auth.password_login(email=email, password=password)
+    def login(self, **pkce_options: Any) -> TokenSet:
+        """Run the PKCE Authorization Code login.
+
+        Keyword arguments are forwarded to
+        :meth:`KhdpAuthClient.pkce_login` so callers (CLI / tests) can
+        override callback host/port, browser opener, and timeout.
+        """
+        tokens = self.auth.pkce_login(**pkce_options)
         self.store.save(tokens)
         return tokens
 

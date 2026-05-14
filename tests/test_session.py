@@ -49,11 +49,15 @@ def test_access_token_auto_refresh_when_expired(
         access_token="OLD", refresh_token="RT",
         expires_at=time.time() - 1, app_id=session.config.app_id,
     ))
-    expire_ms = (time.time() + 1200) * 1000
     httpx_mock.add_response(
-        url="https://api.example/_api/member/refresh-token",
+        url="https://api.example/_api/oauth/refresh-token",
         method="POST",
-        json={"accessToken": "NEW", "refreshToken": "RT2", "expireTime": expire_ms},
+        json={
+            "accessToken": "NEW",
+            "refreshToken": "RT2",
+            "tokenType": "Bearer",
+            "expires_in": 1200,
+        },
     )
     assert session.access_token() == "NEW"
     again = session.store.load(session.config.app_id)

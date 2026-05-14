@@ -2,7 +2,8 @@
 
 Subcommands:
 
-* ``khdp login`` -- interactive email + password login against KHDP.
+* ``khdp login`` -- run the PKCE Authorization Code flow with a
+  loopback redirect (opens the user's browser at the KHDP login page).
 * ``khdp logout`` -- delete the cached token.
 * ``khdp status`` -- show whether a token is cached.
 * ``khdp refresh`` -- force a refresh-token rotation.
@@ -15,10 +16,8 @@ Subcommands:
 from __future__ import annotations
 
 import argparse
-import getpass
 import json
 import logging
-import os
 import sys
 from collections.abc import Sequence
 
@@ -41,11 +40,13 @@ def _build_parser() -> argparse.ArgumentParser:
 
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_login = sub.add_parser("login", help="log in with email + password")
-    p_login.add_argument("--email", help="account email (else $KHDP_EMAIL or prompt)")
+    p_login = sub.add_parser(
+        "login",
+        help="log in via the KHDP login page (opens a browser)",
+    )
     p_login.add_argument(
-        "--password-stdin", action="store_true",
-        help="read password from stdin instead of prompting (for scripts)",
+        "--no-browser", action="store_true",
+        help="print the login URL instead of opening a browser",
     )
 
     sub.add_parser("logout", help="delete cached tokens")
@@ -82,43 +83,18 @@ def _emit(payload: object) -> None:
     print(json.dumps(payload, indent=2, sort_keys=True, default=str))
 
 
-def _resolve_email(args: argparse.Namespace) -> str:
-    email = args.email or os.environ.get("KHDP_EMAIL")
-    if email:
-        return email
-    if not sys.stdin.isatty():
-        raise SystemExit(
-            "[khdp] no --email given and stdin is not a TTY. "
-            "Set KHDP_EMAIL or pass --email."
-        )
-    return input("KHDP email: ").strip()
-
-
-def _resolve_password(args: argparse.Namespace) -> str:
-    if args.password_stdin:
-        password = sys.stdin.readline().rstrip("\n")
-        if not password:
-            raise SystemExit("[khdp] --password-stdin given but stdin was empty.")
-        return password
-    env = os.environ.get("KHDP_PASSWORD")
-    if env:
-        return env
-    if not sys.stdin.isatty():
-        raise SystemExit(
-            "[khdp] no password available. Use --password-stdin or set KHDP_PASSWORD."
-        )
-    return getpass.getpass("KHDP password: ")
-
-
 def _cmd_login(session: Session, args: argparse.Namespace) -> int:
-    email = _resolve_email(args)
-    password = _resolve_password(args)
-    tokens = session.login(email=email, password=password)
+    if args.no_browser:
+        def _print_url(url: str) -> bool:
+            print(f"Open this URL in a browser to log in:\n  {url}", file=sys.stderr)
+            return True
+
+        tokens = session.login(open_browser=_print_url)
+    else:
+        tokens = session.login()
     _emit({
         "ok": True,
-        "app_id": tokens.app_id,
         "expires_at": tokens.expires_at,
-        "has_refresh_token": tokens.refresh_token is not None,
     })
     return 0
 
@@ -186,10 +162,8 @@ def _cmd_config(session: Session, _args: argparse.Namespace) -> int:
     cfg = session.config
     _emit({
         "app_id": cfg.app_id or None,
-        "redirect_url": cfg.redirect_url or None,
         "api_base": cfg.api_base,
         "token_dir": str(cfg.token_dir),
-        "use_keyring": cfg.use_keyring,
     })
     return 0
 

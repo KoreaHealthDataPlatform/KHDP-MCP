@@ -37,13 +37,17 @@ class Config:
     """Resolved configuration for the connector."""
 
     # KHDP app registration. ``app_id`` is a UUID issued by KHDP at app
-    # registration time; ``redirect_url`` must match one of the URLs
-    # allowlisted for that app. Both are required even for headless
-    # password login because the KHDP backend validates them.
+    # registration time. ``redirect_url`` is the URL allowlisted for the
+    # app; for the PKCE Loopback flow the CLI uses
+    # ``http://127.0.0.1:<dynamic-port>/callback`` and the KHDP backend
+    # matches IP-literal loopbacks ignoring port (RFC 8252 §7.3).
     app_id: str = ""
     redirect_url: str = ""
     # KHDP API base. Override for staging / on-prem deployments.
     api_base: str = DEFAULT_API_BASE
+    # KHDP web URL the user's browser is sent to during PKCE login.
+    # If empty, derived from ``api_base`` host (path = /external/oauth-login).
+    authorize_url: str = ""
     # Where tokens go on disk. Defaults to platform user-config dir.
     token_dir: Path = field(default_factory=lambda: Path(user_config_dir("khdp")))
     # Use OS keychain via the optional ``keyring`` extra when available.
@@ -72,6 +76,7 @@ def _env_overrides() -> dict[str, Any]:
         "app_id": "KHDP_APP_ID",
         "redirect_url": "KHDP_REDIRECT_URL",
         "api_base": "KHDP_API_BASE",
+        "authorize_url": "KHDP_AUTHORIZE_URL",
     }
     out: dict[str, Any] = {}
     for key, env in mapping.items():
