@@ -4,6 +4,7 @@ transparently."""
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from dataclasses import dataclass
 from typing import Any
@@ -43,8 +44,14 @@ class Session:
 
     # ------------------------------------------------------------------
 
-    def login(self, *, email: str, password: str) -> TokenSet:
-        tokens = self.auth.password_login(email=email, password=password)
+    def login(self, **pkce_options: Any) -> TokenSet:
+        """Run the PKCE Authorization Code login.
+
+        Keyword arguments are forwarded to
+        :meth:`KhdpAuthClient.pkce_login` so callers (CLI / tests) can
+        override callback host/port, browser opener, and timeout.
+        """
+        tokens = self.auth.pkce_login(**pkce_options)
         self.store.save(tokens)
         return tokens
 
@@ -108,20 +115,48 @@ class Session:
     ) -> httpx.Response:
         """Issue an authenticated request against the KHDP API base.
 
+        Raises :class:`AuthError` if the user is not logged in.
         ``path`` may be a full URL or a path relative to ``config.api_base``.
         """
+        return self._request(method, path, params=params, json=json, require_auth=True)
+
+    def request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        json: Any = None,
+    ) -> httpx.Response:
+        """Issue a request that uses the cached token if available.
+
+        Falls back to an anonymous call when no token is cached -- useful
+        for endpoints that allow anonymous access (e.g. ``/open/datasets``
+        list / detail).
+        """
+        return self._request(method, path, params=params, json=json, require_auth=False)
+
+    def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None,
+        json: Any,
+        require_auth: bool,
+    ) -> httpx.Response:
         url = path if path.startswith(("http://", "https://")) else (
             self.config.api_base.rstrip("/") + "/" + path.lstrip("/")
         )
-        token = self.access_token()
+        headers: dict[str, str] = {"User-Agent": "khdp/0.3.0"}
+        if require_auth:
+            headers["Authorization"] = f"Bearer {self.access_token()}"
+        else:
+            # Anonymous fall-through: attach the bearer if we have one,
+            # otherwise just call without it.
+            with contextlib.suppress(AuthError):
+                headers["Authorization"] = f"Bearer {self.access_token()}"
         with httpx.Client(timeout=30.0) as http:
             return http.request(
-                method.upper(),
-                url,
-                params=params,
-                json=json,
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "User-Agent": "khdp/0.1.0",
-                },
+                method.upper(), url, params=params, json=json, headers=headers,
             )

@@ -21,13 +21,19 @@ Auth + MCP connector for the **Korea Health Data Platform (KHDP)**.
 
 ## How it talks to KHDP
 
-The connector uses KHDP's password-based auth API. It implements two
-endpoints that are safe for headless / CLI use:
+The connector authenticates against KHDP via the **OAuth 2.0
+Authorization Code flow with PKCE** (RFC 7636), using a **loopback
+redirect** (RFC 8252 §7.3) so the CLI can capture the auth code on the
+user's own machine without exposing a password to the CLI process or
+the LLM context.
 
-* `POST /_api/oauth/login {appId, redirectUrl, mail, password}` →
-  `{accessToken, refreshToken, expireTime}`
-* `POST /_api/member/refresh-token {refreshToken}` →
-  same shape, rotated.
+* `GET <khdp web>/external/oauth-login?appId&redirectUrl&codeChallenge&...`
+  -- the user's browser is sent here. KHDP's web UI handles login and
+  consent, then redirects to `http://127.0.0.1:<port>/callback?code=...`.
+* `POST /_api/oauth/token        {code, appId, codeVerifier}` -- the
+  CLI exchanges the authorization code for a Bearer token pair.
+* `POST /_api/oauth/refresh-token {appId, refreshToken}` -- rotate an
+  expired access token.
 
 All subsequent KHDP API calls go out with `Authorization: Bearer
 <accessToken>`.
@@ -40,9 +46,10 @@ All subsequent KHDP API calls go out with `Authorization: Bearer
 │                                              ▼             │
 │                                    khdp-connector (this)   │
 │                                              │             │
+│   khdp login (PKCE / browser)                │             │
 │                                              ▼             │
-│   POST /_api/oauth/login          POST /_api/member/...    │
-│       (login + refresh)               (any KHDP endpoint)  │
+│   POST /_api/oauth/token       POST /_api/oauth/...        │
+│        (auth-code → tokens)         (any KHDP endpoint)    │
 │                          khdp.net                          │
 └────────────────────────────────────────────────────────────┘
 ```
@@ -59,39 +66,66 @@ pipx install 'khdp-connector[keyring]'
 
 ## One-time configuration
 
-You need a KHDP-registered `app_id` (UUID) and a registered
-`redirect_url`. Drop them into a config file or env vars:
+You need a KHDP-registered `app_id` (UUID). The CLI uses a loopback
+redirect (`http://127.0.0.1:<port>/callback`) -- the KHDP backend
+matches IP-literal loopbacks ignoring port, so a single registered
+loopback entry on the app is enough.
 
 ```toml
 # ./khdp.local.toml
-app_id       = "00000000-0000-0000-0000-000000000000"
-redirect_url = "https://example.org/khdp-cli"
-api_base     = "https://khdp.net/_api"  # default; override for staging
+app_id   = "00000000-0000-0000-0000-000000000000"
+api_base = "https://khdp.net/_api"  # default; override for staging
 ```
 
 …or:
 
 ```bash
 export KHDP_APP_ID=00000000-0000-0000-0000-000000000000
-export KHDP_REDIRECT_URL=https://example.org/khdp-cli
 ```
 
 > **Don't have an `app_id` yet?** Coordinate with the KHDP team to
-> register a CLI-class app. snuh.ai's public `app_id` won't work for
-> the CLI — its `redirect_url` allowlist excludes anything outside
-> `snuh.ai`.
+> register a CLI-class app with `http://127.0.0.1:*/callback` listed
+> as an allowed redirect URL.
 
 ## CLI usage
 
+### Auth + housekeeping
 ```bash
-khdp login          # prompts for email + password (or use --email / --password-stdin)
+khdp login          # PKCE: opens the browser to the KHDP login page,
+                    # captures the redirect on a local loopback server
+khdp login --no-browser   # print the URL instead (headless / remote)
 khdp status         # is a token cached? when does it expire?
 khdp refresh        # force a refresh-token rotation
-khdp api GET /member/me              # authenticated KHDP API call
 khdp logout         # delete cached tokens
 khdp config         # print resolved configuration
 khdp mcp            # run the MCP server on stdio (for agents)
 ```
+
+### Datasets
+```bash
+khdp datasets list [--query KW] [--policy open|restricted|...] [--page N] [--limit N] [--json]
+khdp datasets show <code>[@<version>] [--json]
+khdp datasets files <code>[@<version>] [--key PREFIX] [--json]
+khdp datasets download-link <code>[@<version>] --key FILE
+khdp datasets download <code>[@<version>] [--out DIR] [--max-pages N] [--dry-run]
+```
+
+* `<code>` alone defaults to `@latest`. `<code>@1.0.0` pins a version.
+* `download` paginates the server's `files-download-link-all`
+  (1000 keys per page) and streams every file to `--out`. Use
+  `--dry-run` to list keys/sizes without fetching; use `--max-pages N`
+  to stop early when only verifying the flow.
+
+### Submissions (scaffold)
+Parser is wired but per-command implementations land in a follow-up
+commit. `khdp submissions <cmd>` currently prints `not implemented yet`.
+
+### Escape hatch
+```bash
+khdp api METHOD PATH [--query KEY=VAL ...] [--data '{...}']
+```
+Use this for any endpoint not covered by a verb above (debugging,
+ops-only routes, …). Output is raw JSON on stdout, status on stderr.
 
 Configuration resolution order (highest first):
 
@@ -99,12 +133,6 @@ Configuration resolution order (highest first):
 2. `khdp.local.toml` in the current working directory
 3. `~/.config/khdp/config.toml` (or platform equivalent)
 4. Built-in defaults
-
-For non-interactive use:
-
-```bash
-KHDP_EMAIL=me@example.com khdp login --password-stdin <<< "$KHDP_PASSWORD"
-```
 
 ## MCP server
 

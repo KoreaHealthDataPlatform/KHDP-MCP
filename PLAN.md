@@ -45,8 +45,13 @@ KHDP 데이터 및 도구를 외부 AI 코딩 에이전트(Claude Code, Codex CL
 
 **인증**
 - `khdp_auth_status` — 현재 인증 상태와 사용자 컨텍스트 조회
-- `khdp_auth_login` — OAuth 부트스트랩 (loopback redirect 처리)
+- `khdp_auth_refresh` — refresh token 회전으로 세션 연장
 - `khdp_auth_logout` — 토큰 폐기
+
+> 로그인은 의도적으로 MCP 도구로 노출하지 않는다. PKCE Loopback
+> 흐름은 브라우저 인터랙션이 필수이고, 사용자 자격 증명을 LLM 컨텍스트
+> 밖에 두는 것이 보안 모델이다. 발급은 사용자가 터미널에서 `khdp login`
+> 한 번 실행한 뒤, MCP 서버는 캐시된 토큰만 읽어 사용한다.
 
 **데이터셋 I/O**
 - `khdp_dataset_list` — 권한 있는 데이터셋 목록 조회 (manifest 기반)

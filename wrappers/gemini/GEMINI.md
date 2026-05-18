@@ -12,9 +12,11 @@ context (analogous to `CLAUDE.md` / `AGENTS.md`).
 | `khdp_auth_logout`  | Delete locally cached tokens. |
 | `khdp_api_request`  | Authenticated HTTP passthrough to the KHDP API. |
 
-KHDP uses a password-based scheme — there is no MCP login tool. If
-status reports `authenticated=false`, ask the user to run `khdp login`
-in their terminal.
+KHDP uses OAuth 2.0 + PKCE (RFC 7636) with a loopback redirect. Login
+requires a browser session on the user's machine, so there is no MCP
+login tool by design. If status reports `authenticated=false`, ask the
+user to run `khdp login` in their terminal -- it opens their browser
+to KHDP's login page.
 
 ## Workflow
 
@@ -24,4 +26,4 @@ in their terminal.
    `khdp_auth_refresh` before data calls.
 4. Prefer dedicated KHDP MCP tools (when present) over
    `khdp_api_request`.
-5. Never echo bearer tokens, passwords, or PHI back to the user.
+5. Never echo bearer tokens or PHI back to the user.
